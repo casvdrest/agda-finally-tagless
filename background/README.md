@@ -45,3 +45,11 @@ version.
   be generated functorially
 2. given an interpreter and a functorial compiler, we can write a functorial
   partial evaluator (that furthermore has all the simplifications too)
+
+==========
+
+Also, there is work in directory ggk of the
+[gaussian-elimination](https://github.com/yallop/gaussian-elimination) repo
+which also illustrates some of the above items, in different ways. It is
+in many ways significantly more modular, but the information is somewhat
+scattered. More details later.
