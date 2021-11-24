@@ -13,7 +13,7 @@ open import Relation.Binary.PropositionalEquality
 
 open import Level renaming (suc to sucL ; zero to zeroL)
 
-module Initial where 
+module HOAS where 
 
   infix  4 ∀[_]
   infixr 5 _↦_
