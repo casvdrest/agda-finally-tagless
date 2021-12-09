@@ -8,6 +8,7 @@ import Data.Nat     as N
 open import Data.Product renaming (_×_ to _P×_ )
 import Data.Sum     as S 
 import Data.List    as L
+open import Data.Unit using (⊤ ; tt)
 open import Data.String
 
 import Relation.Binary.PropositionalEquality as P
@@ -16,44 +17,44 @@ open import Relation.Unary using (IUniversal ; _⇒_)
 open import Function
 open import Level
 
+open import Experiment.Desc
+
 module Final where 
 
-  variable a b c T : Set
+  variable a b c : Set 
 
   {- Various types -} 
 
-  record FunTy (T : Set) : Set where
-    field
-      _↦_ : T → T → T
+  NatT : Constructor
+  NatT = "nat" , `1
 
-  open FunTy ⦃...⦄
-  
-  record BoolTy (T : Set) : Set where
-    field
-      bool : T
+  nat : ∀ {T} → ⦃ _ : NatT ≼ T ⦄ → Mu T
+  nat = inject tt 
 
-  open BoolTy ⦃...⦄
+  BoolT : Constructor
+  BoolT = "bool" , `1
 
-  
-  record NatTy (T : Set) : Set where
-    field
-      nat : T
-  
-  open NatTy ⦃...⦄
-  
-  record ProdTy (T : Set) : Set where
-    field
-      _×_ : T → T → T 
-  
-  open ProdTy ⦃...⦄
-  
-  record SumTy (T : Set) : Set where
-    field
-      _⊎_ : T → T → T 
-  
-  open SumTy ⦃...⦄
+  bool : ∀ {T} → ⦃ BoolT ≼ T ⦄ → Mu T
+  bool = inject tt
 
+  FunT : Constructor
+  FunT = "fun" , `var `× `var
 
+  _↦_ : ∀ {T} → ⦃ FunT ≼ T ⦄ → Mu T → Mu T → Mu T
+  s ↦ t = inject (s , t)
+
+  ProdT : Constructor
+  ProdT = "product" , `var `× `var
+
+  _×_ : ∀ {T} → ⦃ ProdT ≼ T ⦄ → Mu T → Mu T → Mu T
+  s × t = inject (s , t)
+
+  SumT : Constructor
+  SumT = "sum" , `var `× `var
+
+  _⊎_ : ∀ {T} → ⦃ SumT ≼ T ⦄ → Mu T → Mu T → Mu T
+  s ⊎ t = inject (s , t)
+  
   {- Contexts & instance search for typed De Bruijn -} 
 
   Ctx : Set → Set
@@ -69,22 +70,25 @@ module Final where
   instance ∈-there : ∀ {T} {Γ x y s} {t : T} → ⦃ _ : x ∶ t ∈ Γ ⦄ → x ∶ t ∈ ((y , s) L.∷ Γ)
   ∈-there ⦃ w ⦄ = there w
 
+  Repr : TypeDesc → Set₁
+  Repr T = Ctx (Mu T) → Mu T → Set 
+
 
   {- Language Fragments -}
 
-  constrain : ∀ {a} → Set a →  L.List (Set a → Set a) → Set (suc a) → Set (suc a)
+  constrain : TypeDesc →  L.List Constructor → Set₁ → Set₁
   constrain T L.[] A = A
-  constrain T (C L.∷ types) A = ⦃ C T ⦄ → constrain T types A
+  constrain T (C L.∷ types) A = ⦃ C ≼ T ⦄ → constrain T types A
 
-  record Fragment (types : L.List (Set → Set)) : Set₁ where
-    field sem : {T : Set} → constrain T types ((ρ : Ctx T → T → Set) → Set)  
+  record Fragment (types : L.List Constructor) : Set₁ where
+    field sem : {T : TypeDesc} → constrain T types ((ρ : Repr T) → Set)  
 
   open Fragment
 
 
   {- λ-abstraction, application, and variables -} 
 
-  record Lambda {T} ⦃ _ : FunTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record Lambda {T} ⦃ _ : FunT ≼ T ⦄ (ρ : Repr T) : Set where
     infixl 9 _·_
     infix  2 ƛ_⇒_
     infix  10 `_
@@ -93,24 +97,24 @@ module Final where
       _·_  : ∀ {Γ s t} → ρ Γ (s ↦ t) → ρ Γ s → ρ Γ t
       `_   : ∀ {Γ t}   → (x : String) → ⦃ x ∶ t ∈ Γ ⦄ → ρ Γ t
 
-  LambdaF : Fragment [ FunTy ]
+  LambdaF : Fragment [ FunT ]
   LambdaF .sem = Lambda
 
 
   {- Let-binding -} 
 
-  record Let {T} ⦃ _ : FunTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record Let {T} ⦃ _ : FunT ≼ T ⦄ (ρ : Repr T) : Set where
     infix 1 lett_∷=_inn_
     field
       lett_∷=_inn_ : ∀ {Γ s t} → (x : String) → ρ Γ s → ρ ((x , s) L.∷ Γ) t → ρ Γ t 
 
-  LetF : Fragment [ FunTy ]
+  LetF : Fragment [ FunT ]
   LetF .sem = Let
 
 
   {- Boolean expressions -} 
 
-  record Boolean {T} ⦃ _ : BoolTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record Boolean {T} ⦃ _ : BoolT ≼ T ⦄ (ρ : Repr T) : Set where
     infix 1 ¬_
     infix 4 _∧_
     infix 3 _∨_
@@ -120,13 +124,13 @@ module Final where
       _∧_  : ∀ {Γ} → ρ Γ bool → ρ Γ bool → ρ Γ bool 
       _∨_  : ∀ {Γ} → ρ Γ bool → ρ Γ bool → ρ Γ bool
 
-  BoolF : Fragment [ BoolTy ]
+  BoolF : Fragment [ BoolT ]
   BoolF .sem = Boolean
   
 
   {- Natural number expressions -} 
 
-  record Nats {T} ⦃ _ : NatTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record Nats {T} ⦃ _ : NatT ≼ T ⦄ (ρ : Repr T) : Set where
     infix 4 _*_
     infix 3 _+_
     field
@@ -134,85 +138,85 @@ module Final where
       _+_  : ∀ {Γ} → ρ Γ nat → ρ Γ nat → ρ Γ nat
       _*_  : ∀ {Γ} → ρ Γ nat → ρ Γ nat → ρ Γ nat
 
-  NatsF : Fragment [ NatTy ]
+  NatsF : Fragment [ NatT ]
   NatsF .sem = Nats
   
 
   {- NatCase  -} 
   
-  record NatElim {T} ⦃ _ : NatTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record NatElim {T} ⦃ _ : NatT ≼ T ⦄ (ρ : Repr T) : Set where
     infix 1 ncase_of⟨Z⇒_⟩⟨S_⇒_⟩
     field
       ncase_of⟨Z⇒_⟩⟨S_⇒_⟩ : ∀ {Γ t} → ρ Γ nat → ρ Γ t → (x : String) → ρ ((x , nat) L.∷ Γ) t → ρ Γ t 
 
-  NCaseF : Fragment [ NatTy ]
+  NCaseF : Fragment [ NatT ]
   NCaseF .sem = NatElim
 
 
   {- LEQ for natural numbers -} 
 
-  record Ord {T} ⦃ _ : NatTy T ⦄ ⦃ _ : BoolTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record Ord {T} ⦃ _ : NatT ≼ T ⦄ ⦃ _ : BoolT ≼ T ⦄ (ρ : Repr T) : Set where
     infix 2 _≤_
     field
-      _≤_ : ∀ {Γ} → ρ Γ  nat → ρ Γ nat → ρ Γ bool
+      _≤_ : ∀ {Γ} → ρ Γ nat → ρ Γ nat → ρ Γ bool 
 
-  OrdF : Fragment [ NatTy , BoolTy ]
+  OrdF : Fragment [ NatT , BoolT ]
   OrdF .sem = Ord
 
 
   {- Conditionals -} 
 
-  record Cond {T} ⦃ _ : BoolTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record Cond {T} ⦃ _ : BoolT ≼ T ⦄ (ρ : Repr T) : Set where
     infix 1 if_then_else_
     field
       if_then_else_ : ∀ {Γ t} → ρ Γ bool → ρ Γ t → ρ Γ t → ρ Γ t
 
-  CondF : Fragment [ BoolTy ]
+  CondF : Fragment [ BoolT ]
   CondF .sem = Cond
 
 
   {- Product types -}
 
-  record Product {T} ⦃ _ : ProdTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record Product {T} ⦃ _ : ProdT ≼ T ⦄ (ρ : Repr T) : Set where
     infix 2 _,,_
     field
       _,,_ : ∀ {Γ s t} → ρ Γ s → ρ Γ t → ρ Γ (s × t)
       fst : ∀ {Γ s t} → ρ Γ (s × t) → ρ Γ s
       snd : ∀ {Γ s t} → ρ Γ (s × t) → ρ Γ t
 
-  ProductF : Fragment [ ProdTy ]
+  ProductF : Fragment [ ProdT ]
   ProductF .sem = Product
 
 
   {- Sum Types -} 
 
-  record Sum {T} ⦃ _ : SumTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record Sum {T} ⦃ _ : SumT ≼ T ⦄ (ρ : Repr T) : Set where
     field
       inl   : ∀ {Γ s t} → ρ Γ s → ρ Γ (s ⊎ t)
       inr   : ∀ {Γ s t} → ρ Γ t → ρ Γ (s ⊎ t)
 
-  SumF : Fragment [ SumTy ]
+  SumF : Fragment [ SumT ]
   SumF .sem = Sum
   
 
   {- Sum elimination (either) -} 
 
-  record SumElim {T} ⦃ _ : SumTy T ⦄ ⦃ _ : FunTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record SumElim {T} ⦃ _ : SumT ≼ T ⦄ ⦃ _ : FunT ≼ T ⦄ (ρ : Repr T) : Set where
     infix 1 ⟪_,_⟫
     field
       ⟪_,_⟫ : ∀ {Γ s t u} → ρ Γ (s ↦ u) → ρ Γ (t ↦ u) → ρ Γ ((s ⊎ t) ↦ u)
 
-  SumElimF : Fragment [ SumTy , FunTy ]
+  SumElimF : Fragment [ SumT , FunT ]
   SumElimF .sem = SumElim
   
 
   {- Recursive functions -} 
 
-  record Fix {T} ⦃ _ : FunTy T ⦄ (ρ : Ctx T → T → Set) : Set where
+  record Fix {T} ⦃ _ : FunT ≼ T ⦄ (ρ : Repr T) : Set where
     field
       μ_,_⇒_ : ∀ {Γ s t} → (f x : String) → ρ ((x , s) L.∷ (f , (s ↦ t)) L.∷ Γ) t → ρ Γ (s ↦ t)
 
-  FixF : Fragment [ FunTy ]
+  FixF : Fragment [ FunT ]
   FixF .sem = Fix
 
   open Lambda  ⦃...⦄
@@ -246,19 +250,6 @@ module Final where
   open import Data.List.Membership.Propositional.Properties
   open import Data.List.Relation.Unary.Any hiding (lookup)
   open import Data.List.Relation.Unary.All 
-
-  -- A predicate for membership 
-  Member : ∀ {ℓ} {A : Set ℓ} → L.List A → A → Set ℓ
-  Member xs x = x ∈ xs
-  
-  _⊆_ : ∀ {ℓ} {A : Set ℓ} → (xs ys : L.List A) → Set ℓ
-  xs ⊆ ys = All (Member ys) xs
-
-  _⊇_ : ∀ {ℓ} {A : Set ℓ} → (xs ys : L.List A) → Set ℓ
-  xs ⊇ ys = ys ⊆ xs
-
-  IList : ∀ {a ℓ} {A : Set a} → (A → Set ℓ) → A → Set ℓ
-  IList P x = L.List (P x)
 
   infixr 9 _⋈_
   _⋈_ : ∀ {a ℓ} {A : Set a} → (P Q : A → Set ℓ) → A → Set ℓ
@@ -298,7 +289,7 @@ module Final where
 
   -- A language is just a bunch of constructs (fragments), that share a common
   -- set of constraints on their index type. 
-  record Language (types : L.List (Set → Set)) : Set₁ where
+  record Language (types : L.List Constructor) : Set₁ where
     constructor ⟪_⟫
     field constructs : L.List (Fragment types)
 
@@ -311,15 +302,15 @@ module Final where
   fragment-mono : ∀ {xs ys} → ys ⊇ xs → Fragment xs → Fragment ys
   fragment-mono ys⊇xs f .sem = gather (discharge ys⊇xs (f .sem))
 
-    where gather : ∀ {T A} {xs : L.List (Set → Set)}
-                   → (All (λ C → C T) xs → A)
+    where gather : ∀ {T A} {xs : L.List Constructor}
+                   → (All (λ C → C ≼ T) xs → A)
                    → constrain T xs A 
           gather {xs = L.[]} f = f []
           gather {xs = x L.∷ xs} f ⦃ C ⦄ = gather {xs = xs} λ xs → f (C ∷ xs)
 
-          discharge : ∀ {T A} {xs ys : L.List (Set → Set)}
+          discharge : ∀ {T A} {xs ys : L.List Constructor}
                       → ys ⊇ xs → constrain T xs A
-                      → All (λ C → C T) ys → A
+                      → All (λ C → C ≼ T) ys → A
           discharge {xs = L.[]}     ys⊇xs ca cs = ca
           discharge {xs = C L.∷ xs} (x∈ys ∷ ys⊇xs) ca cs
             = discharge ys⊇xs (ca ⦃ lookup cs x∈ys ⦄) cs
@@ -373,15 +364,15 @@ module Final where
   -- of semantics are unconstrained), we return the term type, S, with instance
   -- arguments for all the elements of sems.
   TermOf : ∀ {T}
-           → (types : L.List (Set → Set))
-           → (sems : L.List (constrain T types ((ρ : Ctx T → T → Set) → Set)))
-           → (Ctx T → T → Set)
-           → (T → Set)
+           → (types : L.List Constructor)
+           → (sems : L.List (constrain T types ((ρ : Repr T) → Set)))
+           → Repr T
+           → (Mu T → Set)
            → Set
   TermOf {T} L.[]       fs ρ S
     = L.foldr (λ C a → ⦃ C ρ ⦄ → a) (∃ λ t → S t) fs
   TermOf {T} (C L.∷ types) fs ρ S
-    = ⦃ tyC : C T ⦄ → TermOf types (L.map (λ f → f ⦃ tyC ⦄) fs) ρ S 
+    = ⦃ tyC : C ≼ T ⦄ → TermOf types (L.map (λ f → f ⦃ tyC ⦄) fs) ρ S 
 
   mkpair : ∀ {a b} {A : Set a} {B : A → Set b} → (x : A) → (y : B x) → Σ A B
   mkpair = _,_
@@ -399,10 +390,10 @@ module Final where
 
   {- Example languages -} 
 
-  LBool : Language [ BoolTy ]
+  LBool : Language [ BoolT ]
   LBool .constructs = [ BoolF , CondF ]
 
-  LArith : Language [ NatTy ]
+  LArith : Language [ NatT ]
   LArith .constructs = [ NatsF ]
 
   LExpr = ⊕[ LBool ∙⟨ ∙-disjoint ⟩ LArith ] 
@@ -412,7 +403,6 @@ module Final where
              [ LambdaF , FixF , LetF ]
            ⟫ 
 
-  
   {- Some Terms -} 
 
   term₁ : Term LBool
@@ -468,46 +458,33 @@ module Final where
              ` "n" * (` "rec" · ` "m")
            ⟩
     inn
-      ` "factorial" · nlit 6 ⦂ nat
+      ` "factorial" · nlit 6
+    ⦂ nat
 
-  -- {- Interpreter -}
   
-  data Type : Set where
-    `nat `bool : Type
-    _`↦_ _`×_ _`⊎_ : Type → Type → Type 
-  
-  Val : Type → Set
-  Val `nat = N.ℕ
-  Val `bool = B.Bool
-  Val (s `↦ t) = Val s → Val t
-  Val (s `× t) = Val s P× Val t
-  Val (s `⊎ t) = Val s S.⊎ Val t
+  {- Interpreter -}
 
-  data Env : Ctx Type → Set where
+  Type : TypeDesc
+  Type = [ NatT , BoolT , FunT , ProdT , SumT ]
+
+  -- TODO: specify (modularly) as an algebra over a type description
+  Val : Mu Type → Set
+  Val (mk (S.inj₁ tt)) = N.ℕ
+  Val (mk (S.inj₂ (S.inj₁ tt))) = B.Bool
+  Val (mk (S.inj₂ (S.inj₂ (S.inj₁ (s , t))))) = Val s → Val t
+  Val (mk (S.inj₂ (S.inj₂ (S.inj₂ (S.inj₁ (s , t)))))) = Val s P× Val t
+  Val (mk (S.inj₂ (S.inj₂ (S.inj₂ (S.inj₂ (S.inj₁ (s , t))))))) = Val s S.⊎ Val t
+
+  data Env : Ctx (Mu Type) → Set where
     []  : Env L.[] 
-    _∷_ : ∀ {Γ} {subst : String P× Type} → Val (proj₂ subst) → Env Γ → Env (subst L.∷ Γ) 
+    _∷_ : ∀ {Γ} {subst : String P× Mu Type} → Val (proj₂ subst) → Env Γ → Env (subst L.∷ Γ) 
 
   fetch : ∀ {x t Γ} → x ∶ t ∈ Γ → Env Γ → Val t
   fetch here      (v ∷ _)  = v
   fetch (there l) (_ ∷ nv) = fetch l nv
 
-  Interp : Ctx Type → Type → Set
+  Interp : Ctx (Mu Type) → Mu Type → Set
   Interp Γ t = Env Γ → Val t
-
-  instance type-fun : FunTy Type
-  type-fun ._↦_ = _`↦_
-  
-  instance type-nat : NatTy Type
-  type-nat .nat = `nat
-  
-  instance type-bool : BoolTy Type
-  type-bool .bool = `bool
-  
-  instance type-product : ProdTy Type
-  type-product ._×_ = _`×_
-  
-  instance type-sum : SumTy Type
-  type-sum ._⊎_ = _`⊎_
   
   instance eval-lambda : Lambda Interp
   eval-lambda .ƛ_⇒_ = λ _ f nv x   → f (x ∷ nv) 
@@ -590,12 +567,12 @@ module Final where
   test₇ : proj₂ term₇ [] P.≡ 720
   test₇ = P.refl
 
-  -- {- Pretty printing -}
+  {- Pretty printing -}
   
   open import Data.String
   open import Agda.Builtin.String renaming (primShowNat to showℕ)
   
-  PP : Ctx T → T → Set
+  PP : Ctx (Mu Type) → (Mu Type) → Set
   PP _ _ = String
   
   showB : B.Bool → String
