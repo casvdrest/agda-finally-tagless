@@ -15,7 +15,7 @@ import Relation.Binary.PropositionalEquality as P
 open import Relation.Unary using (IUniversal ; _⇒_)
 
 open import Function
-open import Level
+open import Level renaming (suc to sucL)
 
 open import Experiment.Desc
 
@@ -29,13 +29,13 @@ module Final where
   NatT = "nat" , `1
 
   nat : ∀ {T} → ⦃ _ : NatT ≼ T ⦄ → Mu T
-  nat = inject tt 
+  nat = inject (lift tt) 
 
   BoolT : Constructor
   BoolT = "bool" , `1
 
   bool : ∀ {T} → ⦃ BoolT ≼ T ⦄ → Mu T
-  bool = inject tt
+  bool = inject (lift tt)
 
   FunT : Constructor
   FunT = "fun" , `var `× `var
@@ -71,7 +71,7 @@ module Final where
   ∈-there ⦃ w ⦄ = there w
 
   Repr : TypeDesc → Set₁
-  Repr T = Ctx (Mu T) → Mu T → Set 
+  Repr T = Ctx (Mu T) → Mu T → Set
 
 
   {- Language Fragments -}
@@ -81,7 +81,7 @@ module Final where
   constrain T (C L.∷ types) A = ⦃ C ≼ T ⦄ → constrain T types A
 
   record Fragment (types : L.List Constructor) : Set₁ where
-    field sem : {T : TypeDesc} → constrain T types ((ρ : Repr T) → Set)  
+    field sem : {T : TypeDesc} → constrain T types (Repr T → Set)  
 
   open Fragment
 
@@ -99,7 +99,6 @@ module Final where
 
   LambdaF : Fragment [ FunT ]
   LambdaF .sem = Lambda
-
 
   {- Let-binding -} 
 
@@ -287,6 +286,10 @@ module Final where
   inj-ys  ∙-copy = id
   from-zs ∙-copy = λ x → these x x
 
+  data Listω (Ω : Setω) : Setω where
+    []ω : Listω Ω
+    _∷ω_ : Ω → Listω Ω → Listω Ω  
+
   -- A language is just a bunch of constructs (fragments), that share a common
   -- set of constraints on their index type. 
   record Language (types : L.List Constructor) : Set₁ where
@@ -464,182 +467,183 @@ module Final where
   
   {- Interpreter -}
 
-  Type : TypeDesc
-  Type = [ NatT , BoolT , FunT , ProdT , SumT ]
 
-  -- TODO: specify (modularly) as an algebra over a type description
-  Val : Mu Type → Set
-  Val (mk (S.inj₁ tt)) = N.ℕ
-  Val (mk (S.inj₂ (S.inj₁ tt))) = B.Bool
-  Val (mk (S.inj₂ (S.inj₂ (S.inj₁ (s , t))))) = Val s → Val t
-  Val (mk (S.inj₂ (S.inj₂ (S.inj₂ (S.inj₁ (s , t)))))) = Val s P× Val t
-  Val (mk (S.inj₂ (S.inj₂ (S.inj₂ (S.inj₂ (S.inj₁ (s , t))))))) = Val s S.⊎ Val t
+  NatV : ReprClause NatT Set
+  NatV .clause (lift tt) = N.ℕ
 
-  data Env : Ctx (Mu Type) → Set where
-    []  : Env L.[] 
-    _∷_ : ∀ {Γ} {subst : String P× Mu Type} → Val (proj₂ subst) → Env Γ → Env (subst L.∷ Γ) 
+  BoolV : ReprClause BoolT Set
+  BoolV .clause (lift tt) = B.Bool
 
-  fetch : ∀ {x t Γ} → x ∶ t ∈ Γ → Env Γ → Val t
-  fetch here      (v ∷ _)  = v
-  fetch (there l) (_ ∷ nv) = fetch l nv
+  FunV : ReprClause FunT Set
+  FunV .clause (s , t) = s → t
 
-  Interp : Ctx (Mu Type) → Mu Type → Set
-  Interp Γ t = Env Γ → Val t
-  
-  instance eval-lambda : Lambda Interp
-  eval-lambda .ƛ_⇒_ = λ _ f nv x   → f (x ∷ nv) 
-  eval-lambda ._·_  = λ f x nv     → f nv (x nv)
-  eval-lambda .`_   = λ _ ⦃ x ⦄ nv → fetch x nv
+  ProdV : ReprClause ProdT Set
+  ProdV .clause (s , t) = s P× t
 
-  instance eval-let : Let Interp
+  SumV : ReprClause SumT Set
+  SumV .clause (s , t) = s S.⊎ t  
+
+  -- Environments. Only work for representation functors that target `Set`
+  data Env {T} (V : ReprDesc T Set) : Ctx (Mu T) → Set where
+    []  : Env V L.[] 
+    _∷_ : ∀ {Γ} {x : String} {t : Mu T} → < V > t → Env V Γ → Env V ((x , t) L.∷ Γ) 
+
+  fetch : ∀  {T} {V : ReprDesc T Set} x {t Γ} → ⦃ x ∶ t ∈ Γ ⦄ → Env V Γ → < V > t
+  fetch _ ⦃ here ⦄      (v ∷ _)  = v
+  fetch _ ⦃ (there l) ⦄ (_ ∷ nv) = fetch _ ⦃ l ⦄ nv
+
+  Interp : ∀ {T} → (ReprDesc T Set) →  Ctx (Mu T) → Mu T → Set
+  Interp {T} V Γ t = Env V Γ → < V > t
+
+  variable V : ReprDesc T Set 
+
+  instance eval-lambda : ⦃ _ : FunV ◃ V ⦄ → Lambda (Interp V)
+  eval-lambda .ƛ_⇒_ = λ _ f nv → ↑ λ x → f (x ∷ nv)
+  eval-lambda ._·_  = λ f x nv → ↓ (f nv) $ x nv
+  eval-lambda .`_   = λ x nv → fetch x nv 
+
+  instance eval-let : ⦃ _ : FunV ◃ V ⦄ → Let (Interp V)
   eval-let .lett_∷=_inn_ = λ x e₁ e₂ nv → e₂ (e₁ nv ∷ nv)
 
   import Function
-  ↑₀ = Function.const
-
-  ↑₁ : ∀ {A B C : Set} → (A → B) → (C → A) → (C → B)
-  ↑₁ h f x = h (f x)
-
-  ↑₂ : ∀ {A B C D : Set} → (A → B → C) → (D → A) → (D → B) → D → C
-  ↑₂ h f g x = h (f x) (g x)
-
-  ↑₃ : ∀ {A B C D E : Set} → (A → B → C → D) → (E → A) → (E → B) → (E → C) → E → D
-  ↑₃ h f g g' x = h (f x) (g x) (g' x)
   
-  instance eval-boolean : Boolean Interp
-  eval-boolean .blit = ↑₀ 
-  eval-boolean .¬_   = ↑₁ B.not
-  eval-boolean ._∧_  = ↑₂ B._∧_
-  eval-boolean ._∨_  = ↑₂ B._∨_
+  instance eval-boolean : ⦃ _ : BoolV ◃ V ⦄ → Boolean (Interp V)
+  eval-boolean .blit = λ x _ → ↑ x  
+  eval-boolean .¬_   = λ x nv → ↑ (B.not (↓ (x nv)))
+  eval-boolean ._∧_  = λ x y nv → ↑ ((↓ (x nv)) B.∧ (↓ (y nv))) 
+  eval-boolean ._∨_  = λ x y nv → ↑ ((↓ (x nv)) B.∨ (↓ (y nv))) 
 
-  instance eval-nats : Nats Interp
-  eval-nats .nlit = ↑₀ 
-  eval-nats ._+_  = ↑₂ N._+_
-  eval-nats ._*_  = ↑₂ N._*_
+  instance eval-nats : ⦃ _ : NatV ◃ V ⦄ → Nats (Interp V)
+  eval-nats .nlit = λ x _ → ↑ x  
+  eval-nats ._+_  = λ x y nv → ↑ ((↓ (x nv)) N.+ (↓ (y nv))) 
+  eval-nats ._*_  = λ x y nv → ↑ ((↓ (x nv)) N.* (↓ (y nv))) 
 
-  instance eval-ncase : NatElim Interp
+  instance eval-ncase : ⦃ _ : NatV ◃ V ⦄ → NatElim (Interp V)
   eval-ncase .ncase_of⟨Z⇒_⟩⟨S_⇒_⟩
-    = λ n z _ s nv → Function.case n nv of λ { N.zero → z nv ; (N.suc k) → s (k ∷ nv) }
+    = λ n z _ s nv → Function.case ↓ (n nv) of λ { N.zero → z nv ; (N.suc k) → s (↑ k ∷ nv) }
 
-  instance eval-ord : Ord Interp
-  eval-ord ._≤_ = ↑₂ λ n m → B.not (m N.<ᵇ n)
+  instance eval-ord : ⦃ _ : BoolV ◃ V ⦄ → ⦃ _ : NatV ◃ V ⦄ → Ord (Interp V)
+  eval-ord ._≤_ = λ n m nv → ↑ (B.not (↓ (m nv) N.<ᵇ ↓ (n nv)))
   
-  instance eval-cond : Cond Interp
-  eval-cond .if_then_else_ = ↑₃ B.if_then_else_
+  instance eval-cond : ⦃ _ : BoolV ◃ V ⦄ → Cond (Interp V)
+  eval-cond .if_then_else_ = λ c t e nv → B.if ↓ (c nv) then (t nv) else (e nv)
   
-  instance eval-prod : Product Interp
-  eval-prod ._,,_ = ↑₂ _,_
-  eval-prod .fst  = ↑₁ proj₁
-  eval-prod .snd  = ↑₁ proj₂
+  instance eval-prod : ⦃ _ : ProdV ◃ V ⦄ → Product (Interp V)
+  eval-prod ._,,_ = λ x y nv → ↑ (x nv , y nv) 
+  eval-prod .fst  = λ x nv → proj₁ (↓ (x nv)) 
+  eval-prod .snd  = λ x nv → proj₂ (↓ (x nv)) 
+
+  instance eval-sum : ⦃ _ : SumV ◃ V ⦄ → Sum (Interp V)
+  eval-sum .inl = λ x nv → ↑ (S.inj₁ (x nv))
+  eval-sum .inr = λ x nv → ↑ (S.inj₂ (x nv))
   
-  instance eval-sum : Sum Interp
-  eval-sum .inl = ↑₁ S.inj₁
-  eval-sum .inr = ↑₁ S.inj₂
-  
-  instance eval-sum-elim : SumElim Interp
-  eval-sum-elim .⟪_,_⟫ = ↑₂ S.[_,_]
+  instance eval-sum-elim : ⦃ _ : FunV ◃ V ⦄ → ⦃ _ : SumV ◃ V ⦄ → SumElim (Interp V)
+  eval-sum-elim .⟪_,_⟫ = λ x y nv → ↑ λ z → S.[ ↓ (x nv) , ↓ (y nv) ] (↓ z)
   
   {-# TERMINATING #-} -- nope
   fix' : ∀ {A B : Set} → ((A → B) → A → B) → A → B
   fix' f = f (fix' f)
   
-  instance eval-fix : Fix Interp
-  eval-fix .μ_,_⇒_ = λ _ x e nv → fix' λ f v → e (v ∷ (f ∷ nv))
+  instance eval-fix : ⦃ _ : FunV ◃ V ⦄ → Fix (Interp V)
+  eval-fix .μ_,_⇒_ = λ _ x e nv → ↑ (fix' λ f v → e (v ∷ (↑ f) ∷ nv)) 
 
-  test₁ : proj₂ term₁ [] P.≡ B.false
-  test₁ = P.refl
-
-  test₂ : proj₂ term₂ [] P.≡ 9
-  test₂ = P.refl
-
-  test₃ : proj₂ term₃ [] P.≡ 4
-  test₃ = P.refl
-
-  test₄ : proj₂ term₄ [] P.≡ B.false
-  test₄ = P.refl
-
-  test₅ : proj₂ term₅ [] P.≡ B.true
-  test₅ = P.refl
-
-  test₆ : proj₂ term₆ [] P.≡ 6
-  test₆ = P.refl
-
-  test₇ : proj₂ term₇ [] P.≡ 720
-  test₇ = P.refl
-
-  {- Pretty printing -}
   
-  open import Data.String
-  open import Agda.Builtin.String renaming (primShowNat to showℕ)
-  
-  PP : Ctx (Mu Type) → (Mu Type) → Set
-  PP _ _ = String
-  
-  showB : B.Bool → String
-  showB B.true  = "true"
-  showB B.false = "false"
-  
-  instance pp-lambda : Lambda PP
-  pp-lambda .ƛ_⇒_ = λ x f → "(λ" ++ x  ++ " → " ++ f ++ ")"  
-  pp-lambda ._·_  = λ f x → f ++ " " ++ x
-  pp-lambda .`_   = λ x → x
 
-  instance pp-let : Let PP
-  Let.lett_∷=_inn_ pp-let = λ x y z → "let " ++ x ++ " ∷= " ++ y ++ " in " ++ z
+  -- test₁ : proj₂ term₁ [] P.≡ B.false
+  -- test₁ = P.refl
+
+
+  -- -- test₂ : proj₂ term₂ [] P.≡ 9
+  -- -- test₂ = P.refl
+
+  -- -- test₃ : proj₂ term₃ [] P.≡ 4
+  -- -- test₃ = P.refl
+
+  -- -- test₄ : proj₂ term₄ [] P.≡ B.false
+  -- -- test₄ = P.refl
+
+  -- -- test₅ : proj₂ term₅ [] P.≡ B.true
+  -- -- test₅ = P.refl
+
+  -- -- test₆ : proj₂ term₆ [] P.≡ 6
+  -- -- test₆ = P.refl
+
+  -- -- test₇ : proj₂ term₇ [] P.≡ 720
+  -- -- test₇ = P.refl
+
+  -- -- -- {- Pretty printing -}
   
-  instance pp-boolean : Boolean PP
-  pp-boolean .blit = λ x → showB x
-  pp-boolean .¬_   = λ x → "¬ " ++ x
-  pp-boolean ._∧_  = λ x y → x ++ " ∧ " ++ y
-  pp-boolean ._∨_  = λ x y → x ++ " ∨ " ++ y
+  -- -- -- open import Data.String
+  -- -- -- open import Agda.Builtin.String renaming (primShowNat to showℕ)
   
-  instance pp-nats : Nats PP
-  pp-nats .nlit = λ n → showℕ n
-  pp-nats ._+_ = λ x y → x ++ " + " ++ y
-  pp-nats ._*_ = λ x y → x ++ " * " ++ y
-
-  instance pp-ncase : NatElim PP
-  NatElim.ncase_of⟨Z⇒_⟩⟨S_⇒_⟩ pp-ncase = λ n z k s → "ncase " ++ n ++ " of ⟨Z⇒ " ++ z ++ " ⟩⟨S " ++ k ++ " ⇒ " ++ s ++ "⟩"
-
-  instance pp-ord : Ord PP
-  pp-ord ._≤_ = λ x y → x ++ " ≤ " ++ y
+  -- -- -- PP : Ctx (Mu Type) → (Mu {0ℓ} Type) → Set
+  -- -- -- PP _ _ = String
   
-  instance pp-cond : Cond PP
-  pp-cond .if_then_else_ = λ c t e → "if " ++ c ++ " then " ++ t ++ " else " ++ e 
+  -- -- -- showB : B.Bool → String
+  -- -- -- showB B.true  = "true"
+  -- -- -- showB B.false = "false"
   
-  instance pp-prod : Product PP
-  pp-prod ._,,_ = λ x y → x ++ " , " ++ y 
-  pp-prod .fst = λ x → "fst " ++ x 
-  pp-prod .snd = λ y → "snd " ++ y
+  -- -- -- instance pp-lambda : Lambda PP
+  -- -- -- pp-lambda .ƛ_⇒_ = λ x f → "(λ" ++ x  ++ " → " ++ f ++ ")"  
+  -- -- -- pp-lambda ._·_  = λ f x → f ++ " " ++ x
+  -- -- -- pp-lambda .`_   = λ x → x
+
+  -- -- -- instance pp-let : Let PP
+  -- -- -- Let.lett_∷=_inn_ pp-let = λ x y z → "let " ++ x ++ " ∷= " ++ y ++ " in " ++ z
   
-  instance pp-sum : Sum PP
-  pp-sum .inl = λ x → "inl " ++ x 
-  pp-sum .inr = λ x → "inr " ++ x
+  -- -- -- instance pp-boolean : Boolean PP
+  -- -- -- pp-boolean .blit = λ x → showB x
+  -- -- -- pp-boolean .¬_   = λ x → "¬ " ++ x
+  -- -- -- pp-boolean ._∧_  = λ x y → x ++ " ∧ " ++ y
+  -- -- -- pp-boolean ._∨_  = λ x y → x ++ " ∨ " ++ y
   
-  instance pp-sum-elim : SumElim PP
-  pp-sum-elim .⟪_,_⟫ = λ l r → "[ " ++ l ++ " , " ++ r ++ "]"
+  -- -- -- instance pp-nats : Nats PP
+  -- -- -- pp-nats .nlit = λ n → showℕ n
+  -- -- -- pp-nats ._+_ = λ x y → x ++ " + " ++ y
+  -- -- -- pp-nats ._*_ = λ x y → x ++ " * " ++ y
 
-  instance pp-fix : Fix PP
-  pp-fix .μ_,_⇒_  = λ rec x f → "μ " ++ rec ++ " " ++ x ++ " → " ++ f 
+  -- -- -- instance pp-ncase : NatElim PP
+  -- -- -- NatElim.ncase_of⟨Z⇒_⟩⟨S_⇒_⟩ pp-ncase = λ n z k s → "ncase " ++ n ++ " of ⟨Z⇒ " ++ z ++ " ⟩⟨S " ++ k ++ " ⇒ " ++ s ++ "⟩"
+
+  -- -- -- instance pp-ord : Ord PP
+  -- -- -- pp-ord ._≤_ = λ x y → x ++ " ≤ " ++ y
   
-  test₈ : proj₂ term₁ P.≡ "true ∧ false"
-  test₈ = P.refl
+  -- -- -- instance pp-cond : Cond PP
+  -- -- -- pp-cond .if_then_else_ = λ c t e → "if " ++ c ++ " then " ++ t ++ " else " ++ e 
+  
+  -- -- -- instance pp-prod : Product PP
+  -- -- -- pp-prod ._,,_ = λ x y → x ++ " , " ++ y 
+  -- -- -- pp-prod .fst = λ x → "fst " ++ x 
+  -- -- -- pp-prod .snd = λ y → "snd " ++ y
+  
+  -- -- -- instance pp-sum : Sum PP
+  -- -- -- pp-sum .inl = λ x → "inl " ++ x 
+  -- -- -- pp-sum .inr = λ x → "inr " ++ x
+  
+  -- -- -- instance pp-sum-elim : SumElim PP
+  -- -- -- pp-sum-elim .⟪_,_⟫ = λ l r → "[ " ++ l ++ " , " ++ r ++ "]"
 
-  test₉ : proj₂ term₂ P.≡ "1 + 2 * 3"
-  test₉ = P.refl
+  -- -- -- instance pp-fix : Fix PP
+  -- -- -- pp-fix .μ_,_⇒_  = λ rec x f → "μ " ++ rec ++ " " ++ x ++ " → " ++ f 
+  
+  -- -- -- test₈ : proj₂ term₁ P.≡ "true ∧ false"
+  -- -- -- test₈ = P.refl
 
-  test₁₀ : proj₂ term₃ P.≡ "if true ∨ false then 2 * 2 else 3 + 3"
-  test₁₀ = P.refl
+  -- -- -- test₉ : proj₂ term₂ P.≡ "1 + 2 * 3"
+  -- -- -- test₉ = P.refl
 
-  test₁₁ : proj₂ term₄ P.≡ "(λx → x) false"
-  test₁₁ = P.refl
+  -- -- -- test₁₀ : proj₂ term₃ P.≡ "if true ∨ false then 2 * 2 else 3 + 3"
+  -- -- -- test₁₀ = P.refl
 
-  test₁₂ : proj₂ term₅ P.≡ "¬ 10 ≤ (λn → n * n) 3"
-  test₁₂ = P.refl
+  -- -- -- test₁₁ : proj₂ term₄ P.≡ "(λx → x) false"
+  -- -- -- test₁₁ = P.refl
 
-  test₁₃ : proj₂ term₆ P.≡ "if 1 + 2 ≤ 3 then (λx → x + x) 3 else 0"
-  test₁₃ = P.refl
+  -- -- -- test₁₂ : proj₂ term₅ P.≡ "¬ 10 ≤ (λn → n * n) 3"
+  -- -- -- test₁₂ = P.refl
 
-  test₁₄ : proj₂ term₇ P.≡ "let factorial ∷= μ rec n → ncase n of ⟨Z⇒ 1 ⟩⟨S m ⇒ n * rec m⟩ in factorial 6"
-  test₁₄ = P.refl 
+  -- -- -- test₁₃ : proj₂ term₆ P.≡ "if 1 + 2 ≤ 3 then (λx → x + x) 3 else 0"
+  -- -- -- test₁₃ = P.refl
+
+  -- -- -- test₁₄ : proj₂ term₇ P.≡ "let factorial ∷= μ rec n → ncase n of ⟨Z⇒ 1 ⟩⟨S m ⇒ n * rec m⟩ in factorial 6"
+  -- -- -- test₁₄ = P.refl 
   
