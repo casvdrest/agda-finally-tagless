@@ -10,6 +10,7 @@ import Data.Sum     as S
 import Data.List    as L
 open import Data.Unit using (⊤ ; tt)
 open import Data.String
+open import Data.Empty
 
 import Relation.Binary.PropositionalEquality as P
 open import Relation.Unary using (IUniversal ; _⇒_)
@@ -19,7 +20,7 @@ open import Level renaming (suc to sucL)
 
 open import Experiment.Desc
 
-module Final where 
+module _ where 
 
   variable a b c : Set 
 
@@ -218,17 +219,17 @@ module Final where
   FixF : Fragment [ FunT ]
   FixF .sem = Fix
 
-  open Lambda  ⦃...⦄
-  open Let     ⦃...⦄ 
-  open Boolean ⦃...⦄
-  open Nats    ⦃...⦄
-  open NatElim ⦃...⦄
-  open Ord     ⦃...⦄
-  open Cond    ⦃...⦄
-  open Product ⦃...⦄
-  open Sum     ⦃...⦄
-  open SumElim ⦃...⦄
-  open Fix     ⦃...⦄
+  open Lambda  ⦃...⦄ public
+  open Let     ⦃...⦄ public
+  open Boolean ⦃...⦄ public 
+  open Nats    ⦃...⦄ public 
+  open NatElim ⦃...⦄ public 
+  open Ord     ⦃...⦄ public 
+  open Cond    ⦃...⦄ public 
+  open Product ⦃...⦄ public 
+  open Sum     ⦃...⦄ public 
+  open SumElim ⦃...⦄ public 
+  open Fix     ⦃...⦄ public 
 
 
   {- Language composition -}
@@ -285,11 +286,7 @@ module Final where
   inj-xs  ∙-copy = id
   inj-ys  ∙-copy = id
   from-zs ∙-copy = λ x → these x x
-
-  data Listω (Ω : Setω) : Setω where
-    []ω : Listω Ω
-    _∷ω_ : Ω → Listω Ω → Listω Ω  
-
+  
   -- A language is just a bunch of constructs (fragments), that share a common
   -- set of constraints on their index type. 
   record Language (types : L.List Constructor) : Set₁ where
@@ -464,187 +461,52 @@ module Final where
       ` "factorial" · nlit 6
     ⦂ nat
 
-  
-  {- Interpreter -}
 
 
-  NatV : ReprClause NatT Set
-  NatV .clause (lift tt) = N.ℕ
+{- Calculate the type of an extensible and composable definitions of a semantics definition -} 
 
-  BoolV : ReprClause BoolT Set
-  BoolV .clause (lift tt) = B.Bool
+module _ where
 
-  FunV : ReprClause FunT Set
-  FunV .clause (s , t) = s → t
+  open Fragment 
+  open import Data.List.Relation.Unary.All
 
-  ProdV : ReprClause ProdT Set
-  ProdV .clause (s , t) = s P× t
+  _~<_>~_ : ∀  {ℓ} 
+              {types    : L.List Constructor}
+            → (dom      : ∀[ ReprDesc (Set ℓ) ⇒ Repr ])
+            → (bound    : All (ReprClause (Set ℓ)) types)
+            → (fragment : Fragment types)
+            → Set (sucL ℓ)
+  _~<_>~_ {ℓ} {types = types} dom bound fragment = {T : TypeDesc} {V : ReprDesc (Set ℓ) T} → go T V types dom bound (fragment .sem)
 
-  SumV : ReprClause SumT Set
-  SumV .clause (s , t) = s S.⊎ t  
+    where go : ∀ {ℓ} 
+               → (T        : TypeDesc)
+               → (V        : ReprDesc (Set ℓ) T)
+               → (types    : L.List Constructor)
+               → (dom      : ∀[ ReprDesc (Set ℓ) ⇒ Repr ])
+               → (bound    : All (ReprClause (Set ℓ)) types)
+               → (fragment : constrain T types (Repr T → Set))
+               → Set (sucL ℓ) 
+          go     T V L.[]          dom []         fragment
+            = Lift _ (fragment (dom V))
+            
+          -- We include a special case for singleton lists here, to avoid
+          -- allways needing to wrap interpretations in a `Lift`.  Really,
+          -- fragments should be level-polymorphic in the size of the image of
+          -- the representation functor.
+          go     T V (C L.∷ L.[] ) dom (rc ∷ [] ) fragment
+            = ⦃ tx : C ≼ T ⦄ → ⦃ rc ◃ V ⦄ → fragment (dom V)
+          go {ℓ} T V (C L.∷ types) dom (rc ∷ rcs) fragment
+            = ⦃ tx : C ≼ T ⦄ → ⦃ rc ◃ V ⦄ → go T V types dom rcs (fragment ⦃ tx ⦄)
 
-  -- Environments. Only work for representation functors that target `Set`
-  data Env {T} (V : ReprDesc T Set) : Ctx (Mu T) → Set where
-    []  : Env V L.[] 
-    _∷_ : ∀ {Γ} {x : String} {t : Mu T} → < V > t → Env V Γ → Env V ((x , t) L.∷ Γ) 
+  -- A special case for constant representation functors 
+  _~<>~_ : ∀  {types    : L.List Constructor}
+            → (dom      : Set)
+            → (fragment : Fragment types)
+            → Set₁
+  dom ~<>~ fragment = (λ _ _ _ → dom) ~< fill dom >~ fragment
 
-  fetch : ∀  {T} {V : ReprDesc T Set} x {t Γ} → ⦃ x ∶ t ∈ Γ ⦄ → Env V Γ → < V > t
-  fetch _ ⦃ here ⦄      (v ∷ _)  = v
-  fetch _ ⦃ (there l) ⦄ (_ ∷ nv) = fetch _ ⦃ l ⦄ nv
-
-  Interp : ∀ {T} → (ReprDesc T Set) →  Ctx (Mu T) → Mu T → Set
-  Interp {T} V Γ t = Env V Γ → < V > t
-
-  variable V : ReprDesc T Set 
-
-  instance eval-lambda : ⦃ _ : FunV ◃ V ⦄ → Lambda (Interp V)
-  eval-lambda .ƛ_⇒_ = λ _ f nv → ↑ λ x → f (x ∷ nv)
-  eval-lambda ._·_  = λ f x nv → ↓ (f nv) $ x nv
-  eval-lambda .`_   = λ x nv → fetch x nv 
-
-  instance eval-let : ⦃ _ : FunV ◃ V ⦄ → Let (Interp V)
-  eval-let .lett_∷=_inn_ = λ x e₁ e₂ nv → e₂ (e₁ nv ∷ nv)
-
-  import Function
-  
-  instance eval-boolean : ⦃ _ : BoolV ◃ V ⦄ → Boolean (Interp V)
-  eval-boolean .blit = λ x _ → ↑ x  
-  eval-boolean .¬_   = λ x nv → ↑ (B.not (↓ (x nv)))
-  eval-boolean ._∧_  = λ x y nv → ↑ ((↓ (x nv)) B.∧ (↓ (y nv))) 
-  eval-boolean ._∨_  = λ x y nv → ↑ ((↓ (x nv)) B.∨ (↓ (y nv))) 
-
-  instance eval-nats : ⦃ _ : NatV ◃ V ⦄ → Nats (Interp V)
-  eval-nats .nlit = λ x _ → ↑ x  
-  eval-nats ._+_  = λ x y nv → ↑ ((↓ (x nv)) N.+ (↓ (y nv))) 
-  eval-nats ._*_  = λ x y nv → ↑ ((↓ (x nv)) N.* (↓ (y nv))) 
-
-  instance eval-ncase : ⦃ _ : NatV ◃ V ⦄ → NatElim (Interp V)
-  eval-ncase .ncase_of⟨Z⇒_⟩⟨S_⇒_⟩
-    = λ n z _ s nv → Function.case ↓ (n nv) of λ { N.zero → z nv ; (N.suc k) → s (↑ k ∷ nv) }
-
-  instance eval-ord : ⦃ _ : BoolV ◃ V ⦄ → ⦃ _ : NatV ◃ V ⦄ → Ord (Interp V)
-  eval-ord ._≤_ = λ n m nv → ↑ (B.not (↓ (m nv) N.<ᵇ ↓ (n nv)))
-  
-  instance eval-cond : ⦃ _ : BoolV ◃ V ⦄ → Cond (Interp V)
-  eval-cond .if_then_else_ = λ c t e nv → B.if ↓ (c nv) then (t nv) else (e nv)
-  
-  instance eval-prod : ⦃ _ : ProdV ◃ V ⦄ → Product (Interp V)
-  eval-prod ._,,_ = λ x y nv → ↑ (x nv , y nv) 
-  eval-prod .fst  = λ x nv → proj₁ (↓ (x nv)) 
-  eval-prod .snd  = λ x nv → proj₂ (↓ (x nv)) 
-
-  instance eval-sum : ⦃ _ : SumV ◃ V ⦄ → Sum (Interp V)
-  eval-sum .inl = λ x nv → ↑ (S.inj₁ (x nv))
-  eval-sum .inr = λ x nv → ↑ (S.inj₂ (x nv))
-  
-  instance eval-sum-elim : ⦃ _ : FunV ◃ V ⦄ → ⦃ _ : SumV ◃ V ⦄ → SumElim (Interp V)
-  eval-sum-elim .⟪_,_⟫ = λ x y nv → ↑ λ z → S.[ ↓ (x nv) , ↓ (y nv) ] (↓ z)
-  
-  {-# TERMINATING #-} -- nope
-  fix' : ∀ {A B : Set} → ((A → B) → A → B) → A → B
-  fix' f = f (fix' f)
-  
-  instance eval-fix : ⦃ _ : FunV ◃ V ⦄ → Fix (Interp V)
-  eval-fix .μ_,_⇒_ = λ _ x e nv → ↑ (fix' λ f v → e (v ∷ (↑ f) ∷ nv))
-
-  interp : ∀ {T : TypeDesc} {Γ} {t : Mu T} → (V : ReprDesc T Set) → Interp V Γ t → Env V Γ → < V > t
-  interp _ = id
-
-  -- test₁ : interp (BoolV ∷ []) {!term₁ .proj₂!} [] P.≡ B.false
-  -- test₁ = P.refl
-
-
-  -- -- test₂ : proj₂ term₂ [] P.≡ 9
-  -- -- test₂ = P.refl
-
-  -- -- test₃ : proj₂ term₃ [] P.≡ 4
-  -- -- test₃ = P.refl
-
-  -- -- test₄ : proj₂ term₄ [] P.≡ B.false
-  -- -- test₄ = P.refl
-
-  -- -- test₅ : proj₂ term₅ [] P.≡ B.true
-  -- -- test₅ = P.refl
-
-  -- -- test₆ : proj₂ term₆ [] P.≡ 6
-  -- -- test₆ = P.refl
-
-  -- -- test₇ : proj₂ term₇ [] P.≡ 720
-  -- -- test₇ = P.refl
-
-  -- -- -- {- Pretty printing -}
-  
-  -- -- -- open import Data.String
-  -- -- -- open import Agda.Builtin.String renaming (primShowNat to showℕ)
-  
-  -- -- -- PP : Ctx (Mu Type) → (Mu {0ℓ} Type) → Set
-  -- -- -- PP _ _ = String
-  
-  -- -- -- showB : B.Bool → String
-  -- -- -- showB B.true  = "true"
-  -- -- -- showB B.false = "false"
-  
-  -- -- -- instance pp-lambda : Lambda PP
-  -- -- -- pp-lambda .ƛ_⇒_ = λ x f → "(λ" ++ x  ++ " → " ++ f ++ ")"  
-  -- -- -- pp-lambda ._·_  = λ f x → f ++ " " ++ x
-  -- -- -- pp-lambda .`_   = λ x → x
-
-  -- -- -- instance pp-let : Let PP
-  -- -- -- Let.lett_∷=_inn_ pp-let = λ x y z → "let " ++ x ++ " ∷= " ++ y ++ " in " ++ z
-  
-  -- -- -- instance pp-boolean : Boolean PP
-  -- -- -- pp-boolean .blit = λ x → showB x
-  -- -- -- pp-boolean .¬_   = λ x → "¬ " ++ x
-  -- -- -- pp-boolean ._∧_  = λ x y → x ++ " ∧ " ++ y
-  -- -- -- pp-boolean ._∨_  = λ x y → x ++ " ∨ " ++ y
-  
-  -- -- -- instance pp-nats : Nats PP
-  -- -- -- pp-nats .nlit = λ n → showℕ n
-  -- -- -- pp-nats ._+_ = λ x y → x ++ " + " ++ y
-  -- -- -- pp-nats ._*_ = λ x y → x ++ " * " ++ y
-
-  -- -- -- instance pp-ncase : NatElim PP
-  -- -- -- NatElim.ncase_of⟨Z⇒_⟩⟨S_⇒_⟩ pp-ncase = λ n z k s → "ncase " ++ n ++ " of ⟨Z⇒ " ++ z ++ " ⟩⟨S " ++ k ++ " ⇒ " ++ s ++ "⟩"
-
-  -- -- -- instance pp-ord : Ord PP
-  -- -- -- pp-ord ._≤_ = λ x y → x ++ " ≤ " ++ y
-  
-  -- -- -- instance pp-cond : Cond PP
-  -- -- -- pp-cond .if_then_else_ = λ c t e → "if " ++ c ++ " then " ++ t ++ " else " ++ e 
-  
-  -- -- -- instance pp-prod : Product PP
-  -- -- -- pp-prod ._,,_ = λ x y → x ++ " , " ++ y 
-  -- -- -- pp-prod .fst = λ x → "fst " ++ x 
-  -- -- -- pp-prod .snd = λ y → "snd " ++ y
-  
-  -- -- -- instance pp-sum : Sum PP
-  -- -- -- pp-sum .inl = λ x → "inl " ++ x 
-  -- -- -- pp-sum .inr = λ x → "inr " ++ x
-  
-  -- -- -- instance pp-sum-elim : SumElim PP
-  -- -- -- pp-sum-elim .⟪_,_⟫ = λ l r → "[ " ++ l ++ " , " ++ r ++ "]"
-
-  -- -- -- instance pp-fix : Fix PP
-  -- -- -- pp-fix .μ_,_⇒_  = λ rec x f → "μ " ++ rec ++ " " ++ x ++ " → " ++ f 
-  
-  -- -- -- test₈ : proj₂ term₁ P.≡ "true ∧ false"
-  -- -- -- test₈ = P.refl
-
-  -- -- -- test₉ : proj₂ term₂ P.≡ "1 + 2 * 3"
-  -- -- -- test₉ = P.refl
-
-  -- -- -- test₁₀ : proj₂ term₃ P.≡ "if true ∨ false then 2 * 2 else 3 + 3"
-  -- -- -- test₁₀ = P.refl
-
-  -- -- -- test₁₁ : proj₂ term₄ P.≡ "(λx → x) false"
-  -- -- -- test₁₁ = P.refl
-
-  -- -- -- test₁₂ : proj₂ term₅ P.≡ "¬ 10 ≤ (λn → n * n) 3"
-  -- -- -- test₁₂ = P.refl
-
-  -- -- -- test₁₃ : proj₂ term₆ P.≡ "if 1 + 2 ≤ 3 then (λx → x + x) 3 else 0"
-  -- -- -- test₁₃ = P.refl
-
-  -- -- -- test₁₄ : proj₂ term₇ P.≡ "let factorial ∷= μ rec n → ncase n of ⟨Z⇒ 1 ⟩⟨S m ⇒ n * rec m⟩ in factorial 6"
-  -- -- -- test₁₄ = P.refl 
-  
+    where fill : ∀ {types    : L.List Constructor}
+                 → (dom      : Set)
+                 → All (ReprClause Set) types 
+          fill {types = L.[]}        dom = []
+          fill {types = C L.∷ types} dom = (λ where .clause _ → dom) ∷ fill dom
