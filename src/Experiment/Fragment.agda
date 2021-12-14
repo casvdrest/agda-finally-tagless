@@ -545,11 +545,12 @@ module Final where
   fix' f = f (fix' f)
   
   instance eval-fix : ⦃ _ : FunV ◃ V ⦄ → Fix (Interp V)
-  eval-fix .μ_,_⇒_ = λ _ x e nv → ↑ (fix' λ f v → e (v ∷ (↑ f) ∷ nv)) 
+  eval-fix .μ_,_⇒_ = λ _ x e nv → ↑ (fix' λ f v → e (v ∷ (↑ f) ∷ nv))
 
-  
+  interp : ∀ {T : TypeDesc} {Γ} {t : Mu T} → (V : ReprDesc T Set) → Interp V Γ t → Env V Γ → < V > t
+  interp _ = id
 
-  -- test₁ : proj₂ term₁ [] P.≡ B.false
+  -- test₁ : interp (BoolV ∷ []) {!term₁ .proj₂!} [] P.≡ B.false
   -- test₁ = P.refl
 
 

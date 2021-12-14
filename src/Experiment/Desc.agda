@@ -49,7 +49,7 @@ map-con {C = `var}   f x       = f x
 map-con {C = `1}     f (lift tt)      = lift tt
 map-con {C = _ `× _} f (x , y) = map-con f x , map-con f y
 
-map-desc : ∀ {ℓ} {X Y : Set ℓ} {T} → (X → Y) → ⟦ T ⟧ty X → ⟦ T ⟧ty Y
+map-desc : ∀ {x y} {X : Set x} {Y : Set y} {T} → (X → Y) → ⟦ T ⟧ty X → ⟦ T ⟧ty Y
 map-desc {T = c ∷ cs} f (inj₁ x) = inj₁ (map-con  f x)
 map-desc {T = c ∷ cs} f (inj₂ y) = inj₂ (map-desc f y)
 
@@ -88,9 +88,9 @@ mutual
 record _≼_ (C : Constructor) (T : TypeDesc) : Set where
   field sub : C ∈ T 
 
-  inj : ∀ {ℓ} {C T} → C ∈ T  → ∀[ ⟦ C . proj₂ ⟧con ⇒ ⟦_⟧ty {ℓ} T ]
-  inj (here refl) x = inj₁ x
-  inj {ℓ} (there px) x = inj₂ (inj {ℓ} px x)
+inj : ∀ {ℓ} {C T} → C ∈ T  → ∀[ ⟦ C . proj₂ ⟧con ⇒ ⟦_⟧ty {ℓ} T ]
+inj (here refl) x = inj₁ x
+inj {ℓ} (there px) x = inj₂ (inj {ℓ} px x)
 
 open _≼_ ⦃...⦄
 
@@ -129,28 +129,78 @@ record _◃_ {ℓ} {a : Set ℓ} {C : Constructor} {T : TypeDesc} (rc : ReprClau
     -- The constructor C is part of the type description T 
     ⦃ type-sub ⦄ : C ≼ T
 
-    -- The canonical form(s) defined by C are preserved by T 
+    -- The canonical form(s) defined by C are preserved by T  
     canonical    : r [ sub ]= rc
 
 open _◃_ 
 
 
-instance ◃-here : ∀ {ℓ} {a : Set ℓ}  {C} {T} {rc : ReprClause C a} {V : ReprDesc T a} → rc ◃ (rc ∷ V)
+{-
+
+Type checking in Fragment.agda runs aground when including the instances below
+
+instance ◃-here : ∀ {ℓ} {a : Set ℓ} {C} {T}
+                    {rc : ReprClause C a}
+                    {V : ReprDesc T a}
+                  → rc ◃ (rc ∷ V)
 _◃_.type-sub ◃-here = ≼-here
 _◃_.canonical ◃-here = here
 
-instance ◃-there : ∀ {ℓ} {a : Set ℓ}  {C C' : Constructor} {T : TypeDesc} {rc' : ReprClause C' a} {rc : ReprClause C a} {V : ReprDesc T a} → ⦃ _ : rc ◃ V ⦄ → rc ◃ (rc' ∷ V)
+instance ◃-there : ∀ {ℓ} {a : Set ℓ}
+                     {C C' : Constructor} {T : TypeDesc}
+                     {rc' : ReprClause C' a} {rc : ReprClause C a}
+                     {V : ReprDesc T a}
+                   → ⦃ _ : rc ◃ V ⦄ → rc ◃ (rc' ∷ V)
 _◃_.type-sub ◃-there = ≼-there
 _◃_.canonical (◃-there ⦃ px ⦄) = there (canonical px)
+-}
 
 -- up/down cast
 
-postulate ↑ : ∀ {l : String} {c : Con} {T : TypeDesc}
-                 {rc : ReprClause (l , c) Set} {V : ReprDesc T Set} {t : ⟦ c ⟧con (Mu T)}
-               → ⦃ _ : rc ◃ V ⦄
-               → rc .clause (map-con < V > t) → < V > (inject t)
-               
-postulate ↓ : ∀ {l : String} {c : Con} {T : TypeDesc}
-                 {rc : ReprClause (l , c) Set} {V : ReprDesc T Set} {t : ⟦ c ⟧con (Mu T)}
-               → ⦃ _ : rc ◃  V ⦄
-               → < V > (inject t) → rc .clause (map-con < V > t) 
+clause-inj : ∀ {a} {C : Constructor} {T : TypeDesc} {A : Set a}
+               {rc : ReprClause C Set} {V : ReprDesc T Set}
+               {t : ⟦ C .proj₂ ⟧con A}
+               {R : A → Set}
+             → (elem : C ∈ T)
+             → V [ elem ]= rc 
+             → rc .clause (map-con R t) → toAlgebra V (map-desc R (inj elem t))
+clause-inj (here refl)   here      x = x
+clause-inj (there elem) (there cn) x = clause-inj elem cn x
+
+clause-proj : ∀ {a} {C : Constructor} {T : TypeDesc} {A : Set a}
+               {rc : ReprClause C Set} {V : ReprDesc T Set}
+               {t : ⟦ C .proj₂ ⟧con A}
+               {R : A → Set}
+             → (elem : C ∈ T)
+             → V [ elem ]= rc 
+             → toAlgebra V (map-desc R (inj elem t)) → rc .clause (map-con R t)
+clause-proj (here .refl) here       x = x
+clause-proj (there elem) (there cn) x = clause-proj elem cn x 
+
+map-con-def : ∀ {a} (C : Constructor) (T : TypeDesc) {A : Set a}
+                {f : Algebra T A}
+                {c : ⟦ C .proj₂ ⟧con (Mu T)}
+              → map-con (fold-desc f) c ≡ map-fold-con f c
+map-con-def (_ , `var)     _ = refl
+map-con-def (_ , `1)       _ = refl
+map-con-def (l , C₁ `× C₂) T = cong₂ _,_ (map-con-def (l , C₁) T) (map-con-def (l , C₂) T)
+
+map-fold-def : ∀ {a} {T₁ T₂ : TypeDesc} {A : Set a}
+                 {f : Algebra T₂ A}
+                 {t : ⟦ T₁ ⟧ty (Mu T₂)}
+               → map-desc (fold-desc f) t ≡ map-fold f t
+map-fold-def {T₁ = C ∷ T} {T₂} {t = inj₁ x} = cong inj₁ (map-con-def C T₂)
+map-fold-def {T₁ = C ∷ T}      {t = inj₂ y} = cong inj₂ map-fold-def
+
+
+↑ : ∀ {l : String} {c : Con} {T : TypeDesc}
+      {rc : ReprClause (l , c) Set} {V : ReprDesc T Set} {t : ⟦ c ⟧con (Mu T)}
+    → ⦃ _ : rc ◃ V ⦄
+    → rc .clause (map-con < V > t) → < V > (inject t)
+↑ {V = V} ⦃ px ⦄ x = subst (toAlgebra V) map-fold-def (clause-inj sub (px .canonical) x)
+  
+↓ : ∀ {l : String} {c : Con} {T : TypeDesc}
+      {rc : ReprClause (l , c) Set} {V : ReprDesc T Set} {t : ⟦ c ⟧con (Mu T)}
+    → ⦃ _ : rc ◃  V ⦄
+    → < V > (inject t) → rc .clause (map-con < V > t)
+↓ {V = V} ⦃ px ⦄ x = clause-proj sub (px .canonical) (subst (toAlgebra V) (sym map-fold-def) x)
